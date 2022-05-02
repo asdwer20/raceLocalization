@@ -453,7 +453,8 @@ void LaserScanMatcher::processScan(LDP& curr_ldp_scan, const ros::Time& time)
 
   double dt = (time - last_icp_time_).toSec();
   double pr_ch_x, pr_ch_y, pr_ch_a;
-  getPrediction(pr_ch_x, pr_ch_y, pr_ch_a, dt);
+  double odom_vel_x, odom_vel_y; 
+  getPrediction(pr_ch_x, pr_ch_y, pr_ch_a, odom_vel_x, odom_vel_y, dt);
 
   // the predicted change of the laser's position, in the fixed frame
 
@@ -796,7 +797,7 @@ bool LaserScanMatcher::getBaseToLaserTf (const std::string& frame_id)
 // returns the predicted change in pose (in fixed frame)
 // since the last time we did icp
 void LaserScanMatcher::getPrediction(double& pr_ch_x, double& pr_ch_y,
-                                     double& pr_ch_a, double dt)
+                                     double& pr_ch_a, double& odom_vel_x, double& odom_vel_y, double dt)
 {
   boost::mutex::scoped_lock(mutex_);
 
@@ -805,12 +806,16 @@ void LaserScanMatcher::getPrediction(double& pr_ch_x, double& pr_ch_y,
   pr_ch_y = 0.0;
   pr_ch_a = 0.0;
 
+  odom_vel_x = 0.0;
+  odom_vel_y = 0.0;
+
   // **** use velocity (for example from ab-filter)
   if (use_vel_)
   {
     pr_ch_x = dt * latest_vel_msg_.linear.x;
     pr_ch_y = dt * latest_vel_msg_.linear.y;
     pr_ch_a = dt * latest_vel_msg_.angular.z;
+
 
     if      (pr_ch_a >= M_PI) pr_ch_a -= 2.0 * M_PI;
     else if (pr_ch_a < -M_PI) pr_ch_a += 2.0 * M_PI;
@@ -825,11 +830,16 @@ void LaserScanMatcher::getPrediction(double& pr_ch_x, double& pr_ch_y,
     pr_ch_y = latest_odom_msg_.pose.pose.position.y -
               last_used_odom_msg_.pose.pose.position.y;
 
-    pr_ch_a = tf::getYaw(latest_odom_msg_.pose.pose.orientation) -
-              tf::getYaw(last_used_odom_msg_.pose.pose.orientation);
+    odom_vel_x = latest_odom_msg_.twist.twist.linear.x;
+    odom_vel_y = latest_odom_msg_.twist.twist.linear.y;
 
-    if      (pr_ch_a >= M_PI) pr_ch_a -= 2.0 * M_PI;
-    else if (pr_ch_a < -M_PI) pr_ch_a += 2.0 * M_PI;
+    // Commenting this part because we are not using angular information from odometry
+    
+    // pr_ch_a = tf::getYaw(latest_odom_msg_.pose.pose.orientation) -
+    //           tf::getYaw(last_used_odom_msg_.pose.pose.orientation);
+
+    // if      (pr_ch_a >= M_PI) pr_ch_a -= 2.0 * M_PI;
+    // else if (pr_ch_a < -M_PI) pr_ch_a += 2.0 * M_PI;
 
     last_used_odom_msg_ = latest_odom_msg_;
   }
