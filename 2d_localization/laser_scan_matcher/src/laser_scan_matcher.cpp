@@ -725,7 +725,7 @@ void LaserScanMatcher::laserScanToLDP(const sensor_msgs::LaserScan::ConstPtr& sc
 
     double r = scan_msg->ranges[i];
 
-    if (r > scan_msg->range_min && r < scan_msg->range_max)
+    if (r > 0.2 && r < scan_msg->range_max)
     {
       // fill in laser scan data
 

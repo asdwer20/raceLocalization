@@ -180,7 +180,7 @@ class LaserScanMatcher
     bool newKeyframeNeeded(const tf::Transform& d);
 
     void getPrediction(double& pr_ch_x, double& pr_ch_y,
-                       double& pr_ch_a, double dt);
+                       double& pr_ch_a, double& odom_vel_x, double& odom_vel_y, double dt);
 
     void createTfFromXYTheta(double x, double y, double theta, tf::Transform& t);
 };
