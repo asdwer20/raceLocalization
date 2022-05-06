@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 2.8.3)
 project(laser_scan_matcher)
-set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_CXX_STANDARD 14)
 # List C++ dependencies on ros packages
 set( ROS_CXX_DEPENDENCIES
   roscpp
