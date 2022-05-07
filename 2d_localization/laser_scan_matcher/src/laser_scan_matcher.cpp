@@ -187,6 +187,8 @@ void LaserScanMatcher::initParams()
     use_odom_ = true;
   if (!nh_private_.getParam ("use_vel", use_vel_))
     use_vel_ = false;
+  if(!nh_private_.getParam("printDebug_odom",printDebug_odom))
+    printDebug_odom = false;
 
   // **** Are velocity input messages stamped?
   // if false, will subscribe to Twist msgs on /vel
