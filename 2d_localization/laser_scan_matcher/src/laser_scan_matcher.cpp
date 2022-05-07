@@ -95,6 +95,10 @@ LaserScanMatcher::LaserScanMatcher(ros::NodeHandle nh, ros::NodeHandle nh_privat
       "pose_with_covariance_stamped", 5);
   }
 
+  if(publish_odom_){
+    odom_publisher_ = nh_.advertise<nav_msgs::Odometry>("odometry", 5);
+  }
+
   // *** subscribers
 
   if (use_cloud_input_)
@@ -333,6 +337,10 @@ void LaserScanMatcher::initParams()
   // correspondence by 1/sigma^2
   if (!nh_private_.getParam ("use_sigma_weights", input_.use_sigma_weights))
     input_.use_sigma_weights = 0;
+
+  // Add parameters for range in launch file
+  if (!nh_private_.getParam ("range_min", range_min_))
+    range_min_ = 0.2;
 }
 
 void LaserScanMatcher::imuCallback(const sensor_msgs::Imu::ConstPtr& imu_msg)
@@ -455,6 +463,10 @@ void LaserScanMatcher::processScan(LDP& curr_ldp_scan, const ros::Time& time)
   double pr_ch_x, pr_ch_y, pr_ch_a;
   double odom_vel_x, odom_vel_y; 
   getPrediction(pr_ch_x, pr_ch_y, pr_ch_a, odom_vel_x, odom_vel_y, dt);
+
+  if(printDebug_odom){
+    ROS_INFO_STREAM("odom_vel_x: " << odom_vel_x << " odom_vel_y: " << odom_vel_y);
+  }
 
   // the predicted change of the laser's position, in the fixed frame
 
@@ -604,6 +616,41 @@ void LaserScanMatcher::processScan(LDP& curr_ldp_scan, const ros::Time& time)
       tf::StampedTransform transform_msg (f2b_, time, fixed_frame_, base_frame_);
       tf_broadcaster_.sendTransform (transform_msg);
     }
+
+    if (publish_odom_)
+    {
+      nav_msgs::Odometry::Ptr odometry_msg;
+
+      odometry_msg->header.stamp = time;
+      odometry_msg->header.frame_id = fixed_frame_;
+      odometry_msg->child_frame_id = base_frame_;
+
+      tf::poseTFToMsg(f2b_, odometry_msg->pose.pose);
+
+      if (input_.do_compute_covariance)
+      {
+        odometry_msg->pose.covariance = boost::assign::list_of
+          (gsl_matrix_get(output_.cov_x_m, 0, 0)) (0)  (0)  (0)  (0)  (0)
+          (0)  (gsl_matrix_get(output_.cov_x_m, 0, 1)) (0)  (0)  (0)  (0)
+          (0)  (0)  (static_cast<double>(position_covariance_[2])) (0)  (0)  (0)
+          (0)  (0)  (0)  (static_cast<double>(orientation_covariance_[0])) (0)  (0)
+          (0)  (0)  (0)  (0)  (static_cast<double>(orientation_covariance_[1])) (0)
+          (0)  (0)  (0)  (0)  (0)  (gsl_matrix_get(output_.cov_x_m, 0, 2));
+      }
+      else
+      {
+        odometry_msg->pose.covariance = boost::assign::list_of
+          (static_cast<double>(position_covariance_[0])) (0)  (0)  (0)  (0)  (0)
+          (0)  (static_cast<double>(position_covariance_[1])) (0)  (0)  (0)  (0)
+          (0)  (0)  (static_cast<double>(position_covariance_[2])) (0)  (0)  (0)
+          (0)  (0)  (0)  (static_cast<double>(orientation_covariance_[0])) (0)  (0)
+          (0)  (0)  (0)  (0)  (static_cast<double>(orientation_covariance_[1])) (0)
+          (0)  (0)  (0)  (0)  (0)  (static_cast<double>(orientation_covariance_[2]));
+      }
+
+      odom_publisher_.publish(odometry_msg);
+
+    }
   }
   else
   {
@@ -725,7 +772,7 @@ void LaserScanMatcher::laserScanToLDP(const sensor_msgs::LaserScan::ConstPtr& sc
 
     double r = scan_msg->ranges[i];
 
-    if (r > 0.2 && r < scan_msg->range_max)
+    if (r > range_min_ && r < scan_msg->range_max)
     {
       // fill in laser scan data
 
