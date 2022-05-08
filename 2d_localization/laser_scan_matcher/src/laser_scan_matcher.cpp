@@ -210,7 +210,8 @@ void LaserScanMatcher::initParams()
     publish_pose_with_covariance_ = false;
   if (!nh_private_.getParam ("publish_pose_with_covariance_stamped", publish_pose_with_covariance_stamped_))
     publish_pose_with_covariance_stamped_ = false;
-
+  if(!nh_private_.getParam("publish_odom_",publish_odom_))
+    publish_odom_ = false;
   if (!nh_private_.getParam("position_covariance", position_covariance_))
   {
     position_covariance_.resize(3);
@@ -629,27 +630,27 @@ void LaserScanMatcher::processScan(LDP& curr_ldp_scan, const ros::Time& time)
 
       tf::poseTFToMsg(f2b_, odometry_msg->pose.pose);
 
-      if (input_.do_compute_covariance)
-      {
-        odometry_msg->pose.covariance = boost::assign::list_of
-          (gsl_matrix_get(output_.cov_x_m, 0, 0)) (0)  (0)  (0)  (0)  (0)
-          (0)  (gsl_matrix_get(output_.cov_x_m, 0, 1)) (0)  (0)  (0)  (0)
-          (0)  (0)  (static_cast<double>(position_covariance_[2])) (0)  (0)  (0)
-          (0)  (0)  (0)  (static_cast<double>(orientation_covariance_[0])) (0)  (0)
-          (0)  (0)  (0)  (0)  (static_cast<double>(orientation_covariance_[1])) (0)
-          (0)  (0)  (0)  (0)  (0)  (gsl_matrix_get(output_.cov_x_m, 0, 2));
-      }
-      else
-      {
-        odometry_msg->pose.covariance = boost::assign::list_of
-          (static_cast<double>(position_covariance_[0])) (0)  (0)  (0)  (0)  (0)
-          (0)  (static_cast<double>(position_covariance_[1])) (0)  (0)  (0)  (0)
-          (0)  (0)  (static_cast<double>(position_covariance_[2])) (0)  (0)  (0)
-          (0)  (0)  (0)  (static_cast<double>(orientation_covariance_[0])) (0)  (0)
-          (0)  (0)  (0)  (0)  (static_cast<double>(orientation_covariance_[1])) (0)
-          (0)  (0)  (0)  (0)  (0)  (static_cast<double>(orientation_covariance_[2]));
-      }
-
+//      if (input_.do_compute_covariance)
+//      {
+//        odometry_msg->pose.covariance = boost::assign::list_of
+//          (gsl_matrix_get(output_.cov_x_m, 0, 0)) (0)  (0)  (0)  (0)  (0)
+//          (0)  (gsl_matrix_get(output_.cov_x_m, 0, 1)) (0)  (0)  (0)  (0)
+//          (0)  (0)  (static_cast<double>(position_covariance_[2])) (0)  (0)  (0)
+//          (0)  (0)  (0)  (static_cast<double>(orientation_covariance_[0])) (0)  (0)
+//          (0)  (0)  (0)  (0)  (static_cast<double>(orientation_covariance_[1])) (0)
+//          (0)  (0)  (0)  (0)  (0)  (gsl_matrix_get(output_.cov_x_m, 0, 2));
+//      }
+//      else
+//      {
+//        odometry_msg->pose.covariance = boost::assign::list_of
+//          (static_cast<double>(position_covariance_[0])) (0)  (0)  (0)  (0)  (0)
+//         (0)  (static_cast<double>(position_covariance_[1])) (0)  (0)  (0)  (0)
+//          (0)  (0)  (static_cast<double>(position_covariance_[2])) (0)  (0)  (0)
+//          (0)  (0)  (0)  (static_cast<double>(orientation_covariance_[0])) (0)  (0)
+//          (0)  (0)  (0)  (0)  (static_cast<double>(orientation_covariance_[1])) (0)
+//          (0)  (0)  (0)  (0)  (0)  (static_cast<double>(orientation_covariance_[2]));
+//      }
+      ROS_INFO_STREAM("Test");
       odom_publisher_.publish(odometry_msg);
 
     }
