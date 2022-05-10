@@ -110,6 +110,8 @@ class LaserScanMatcher
     bool publish_pose_stamped_;
     bool publish_pose_with_covariance_stamped_;
     bool publish_odom_;
+    bool publish_twist_;
+    
     std::vector<double> position_covariance_;
     std::vector<double> orientation_covariance_;
 
@@ -162,6 +164,9 @@ class LaserScanMatcher
     sm_params input_;
     sm_result output_;
     LDP prev_ldp_scan_;
+
+    geometry_msgs::Pose prev_pose_;
+    bool initialized = false;
 
     // **** methods
 
