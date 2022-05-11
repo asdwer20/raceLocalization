@@ -60,6 +60,9 @@ LaserScanMatcher::LaserScanMatcher(ros::NodeHandle nh, ros::NodeHandle nh_privat
 
   f2b_.setIdentity();
   f2b_kf_.setIdentity();
+  odom_increment_tf_.setIdentity();
+  last_used_odom_tf_.setIdentity();
+  latest_odom_tf_.setIdentity();
   input_.laser[0] = 0.0;
   input_.laser[1] = 0.0;
   input_.laser[2] = 0.0;
@@ -212,8 +215,6 @@ void LaserScanMatcher::initParams()
     publish_pose_with_covariance_stamped_ = false;
   if(!nh_private_.getParam("publish_odom_",publish_odom_))
     publish_odom_ = false;
-  if(!nh_private_.getParam("publish_twist_",publish_twist_))
-    publish_twist_ = false;
   if (!nh_private_.getParam("position_covariance", position_covariance_))
   {
     position_covariance_.resize(3);
@@ -346,6 +347,9 @@ void LaserScanMatcher::initParams()
   // Add parameters for range in launch file
   if (!nh_private_.getParam ("range_min", range_min_))
     range_min_ = 0.2;
+  
+  if (!nh_private_.getParam ("use_occ_map_", use_occ_map_))
+    use_occ_map_ = false;
 }
 
 void LaserScanMatcher::imuCallback(const sensor_msgs::Imu::ConstPtr& imu_msg)
@@ -365,7 +369,6 @@ void LaserScanMatcher::odomCallback(const nav_msgs::Odometry::ConstPtr& odom_msg
   latest_odom_msg_ = *odom_msg;
   if (!received_odom_)
   {
-    last_used_odom_msg_ = *odom_msg;
     received_odom_ = true;
   }
 }
@@ -465,27 +468,18 @@ void LaserScanMatcher::processScan(LDP& curr_ldp_scan, const ros::Time& time)
   // **** estimated change since last scan
 
   double dt = (time - last_icp_time_).toSec();
-  double pr_ch_x, pr_ch_y, pr_ch_a;
-  double odom_vel_x, odom_vel_y; 
-  getPrediction(pr_ch_x, pr_ch_y, pr_ch_a, odom_vel_x, odom_vel_y, dt);
+  double pr_ch_x, pr_ch_y, pr_ch_a;  double odom_vel_x, odom_vel_y; 
 
   if(printDebug_odom){
     ROS_INFO_STREAM("odom_vel_x: " << odom_vel_x << " odom_vel_y: " << odom_vel_y);
   }
 
-  // the predicted change of the laser's position, in the fixed frame
-
-  tf::Transform pr_ch;
-  createTfFromXYTheta(pr_ch_x, pr_ch_y, pr_ch_a, pr_ch);
-
-  // account for the change since the last kf, in the fixed frame
-
-  pr_ch = pr_ch * (f2b_ * f2b_kf_.inverse());
 
   // the predicted change of the laser's position, in the laser frame
+  getPrediction(odom_increment_tf_, dt);  
 
   tf::Transform pr_ch_l;
-  pr_ch_l = laser_to_base_ * f2b_.inverse() * pr_ch * f2b_ * base_to_laser_ ;
+  pr_ch_l = laser_to_base_ * (f2b_kf_.inverse()) * f2b_ * odom_increment_tf_ * base_to_laser_;
 
   input_.first_guess[0] = pr_ch_l.getOrigin().getX();
   input_.first_guess[1] = pr_ch_l.getOrigin().getY();
@@ -511,22 +505,23 @@ void LaserScanMatcher::processScan(LDP& curr_ldp_scan, const ros::Time& time)
   // *** scan match - using point to line icp from CSM
 
   sm_icp(&input_, &output_);
-  tf::Transform corr_ch;
+  tf::Transform corr_ch_l;
 
   if (output_.valid)
   {
 
     // the correction of the laser's position, in the laser frame
-    tf::Transform corr_ch_l;
     createTfFromXYTheta(output_.x[0], output_.x[1], output_.x[2], corr_ch_l);
 
-    // the correction of the base's position, in the base frame
-    corr_ch = base_to_laser_ * corr_ch_l * laser_to_base_;
-
-    // update the pose in the world frame
-    f2b_ = f2b_kf_ * corr_ch;
-
+    f2b_ = f2b_kf_ * base_to_laser_ * corr_ch_l * laser_to_base_;
     // **** publish
+
+    // // Consider Scan Match with map
+    // if(use_occ_map_){
+      
+    // }
+
+
 
     if (publish_pose_)
     {
@@ -631,55 +626,39 @@ void LaserScanMatcher::processScan(LDP& curr_ldp_scan, const ros::Time& time)
       odometry_msg.child_frame_id = base_frame_;
       tf::poseTFToMsg(f2b_, odometry_msg.pose.pose);
 
-      if (input_.do_compute_covariance)
-      {
-        odometry_msg.pose.covariance = boost::assign::list_of
-          (gsl_matrix_get(output_.cov_x_m, 0, 0)) (0)  (0)  (0)  (0)  (0)
-          (0)  (gsl_matrix_get(output_.cov_x_m, 0, 1)) (0)  (0)  (0)  (0)
-          (0)  (0)  (static_cast<double>(position_covariance_[2])) (0)  (0)  (0)
-          (0)  (0)  (0)  (static_cast<double>(orientation_covariance_[0])) (0)  (0)
-          (0)  (0)  (0)  (0)  (static_cast<double>(orientation_covariance_[1])) (0)
-          (0)  (0)  (0)  (0)  (0)  (gsl_matrix_get(output_.cov_x_m, 0, 2));
-      }
-      else
-      {
-        odometry_msg.pose.covariance = boost::assign::list_of
-          (static_cast<double>(position_covariance_[0])) (0)  (0)  (0)  (0)  (0)
-          (0)  (static_cast<double>(position_covariance_[1])) (0)  (0)  (0)  (0)
-          (0)  (0)  (static_cast<double>(position_covariance_[2])) (0)  (0)  (0)
-          (0)  (0)  (0)  (static_cast<double>(orientation_covariance_[0])) (0)  (0)
-          (0)  (0)  (0)  (0)  (static_cast<double>(orientation_covariance_[1])) (0)
-          (0)  (0)  (0)  (0)  (0)  (static_cast<double>(orientation_covariance_[2]));
-      }
+     if (input_.do_compute_covariance)
+     {
+       odometry_msg.pose.covariance = boost::assign::list_of
+         (gsl_matrix_get(output_.cov_x_m, 0, 0)) (0)  (0)  (0)  (0)  (0)
+         (0)  (gsl_matrix_get(output_.cov_x_m, 0, 1)) (0)  (0)  (0)  (0)
+         (0)  (0)  (static_cast<double>(position_covariance_[2])) (0)  (0)  (0)
+         (0)  (0)  (0)  (static_cast<double>(orientation_covariance_[0])) (0)  (0)
+         (0)  (0)  (0)  (0)  (static_cast<double>(orientation_covariance_[1])) (0)
+         (0)  (0)  (0)  (0)  (0)  (gsl_matrix_get(output_.cov_x_m, 0, 2));
+     }
+     else
+     {
+       odometry_msg.pose.covariance = boost::assign::list_of
+         (static_cast<double>(position_covariance_[0])) (0)  (0)  (0)  (0)  (0)
+        (0)  (static_cast<double>(position_covariance_[1])) (0)  (0)  (0)  (0)
+         (0)  (0)  (static_cast<double>(position_covariance_[2])) (0)  (0)  (0)
+         (0)  (0)  (0)  (static_cast<double>(orientation_covariance_[0])) (0)  (0)
+         (0)  (0)  (0)  (0)  (static_cast<double>(orientation_covariance_[1])) (0)
+         (0)  (0)  (0)  (0)  (0)  (static_cast<double>(orientation_covariance_[2]));
+     }
+      odom_publisher_.publish(odometry_msg);
 
-      if(publish_twist_){
-        geometry_msgs::Pose curr_pose = odometry_msg.pose.pose;
-        if(!initialized){
-          odometry_msg.twist.twist.linear.x = curr_pose.position.x/dt;
-          odometry_msg.twist.twist.linear.y = curr_pose.position.y/dt;
-          odometry_msg.twist.twist.angular.z = tf::getYaw(curr_pose.orientation)/dt;
-          initialized = true;
-        } else {
-          odometry_msg.twist.twist.linear.x = (curr_pose.position.x - prev_pose_.position.x)/dt;
-          odometry_msg.twist.twist.linear.y = (curr_pose.position.y - prev_pose_.position.y)/dt;
-          odometry_msg.twist.twist.angular.z = (tf::getYaw(curr_pose.orientation)-tf::getYaw(prev_pose_.orientation)/dt);
-        }
-        
-        odom_publisher_.publish(odometry_msg);
-
-        prev_pose_ = curr_pose;
-      }
     }
   }
   else
   {
-    corr_ch.setIdentity();
+    corr_ch_l.setIdentity();
     ROS_WARN("Error in scan matching");
   }
 
   // **** swap old and new
 
-  if (newKeyframeNeeded(corr_ch))
+  if (newKeyframeNeeded(corr_ch_l))
   {
     // generate a keyframe
     ld_free(prev_ldp_scan_);
@@ -862,18 +841,17 @@ bool LaserScanMatcher::getBaseToLaserTf (const std::string& frame_id)
 
 // returns the predicted change in pose (in fixed frame)
 // since the last time we did icp
-void LaserScanMatcher::getPrediction(double& pr_ch_x, double& pr_ch_y,
-                                     double& pr_ch_a, double& odom_vel_x, double& odom_vel_y, double dt)
+void LaserScanMatcher::getPrediction(tf::Transform& inc_tf, double dt)
 {
   boost::mutex::scoped_lock(mutex_);
 
   // **** base case - no input available, use zero-motion model
-  pr_ch_x = 0.0;
-  pr_ch_y = 0.0;
-  pr_ch_a = 0.0;
+  double pr_ch_x = 0.0;
+  double pr_ch_y = 0.0;
+  double pr_ch_a = 0.0;
 
-  odom_vel_x = 0.0;
-  odom_vel_y = 0.0;
+  double odom_vel_x = 0.0;
+  double odom_vel_y = 0.0;
 
   // **** use velocity (for example from ab-filter)
   if (use_vel_)
@@ -883,22 +861,26 @@ void LaserScanMatcher::getPrediction(double& pr_ch_x, double& pr_ch_y,
     pr_ch_a = dt * latest_vel_msg_.angular.z;
 
 
-    if      (pr_ch_a >= M_PI) pr_ch_a -= 2.0 * M_PI;
-    else if (pr_ch_a < -M_PI) pr_ch_a += 2.0 * M_PI;
+    createTfFromXYTheta( pr_ch_x, pr_ch_y, pr_ch_a,inc_tf );
   }
 
   // **** use wheel odometry
   if (use_odom_ && received_odom_)
   {
-    pr_ch_x = latest_odom_msg_.pose.pose.position.x -
-              last_used_odom_msg_.pose.pose.position.x;
+    // pr_ch_x = latest_odom_msg_.pose.pose.position.x -
+    //           last_used_odom_msg_.pose.pose.position.x;
 
-    pr_ch_y = latest_odom_msg_.pose.pose.position.y -
-              last_used_odom_msg_.pose.pose.position.y;
+    // pr_ch_y = latest_odom_msg_.pose.pose.position.y -
+    //           last_used_odom_msg_.pose.pose.position.y;
 
-    odom_vel_x = latest_odom_msg_.twist.twist.linear.x;
-    odom_vel_y = latest_odom_msg_.twist.twist.linear.y;
+    // odom_vel_x = latest_odom_msg_.twist.twist.linear.x;
+    // odom_vel_y = latest_odom_msg_.twist.twist.linear.y;
 
+    createTfFromXYTheta(latest_odom_msg_.pose.pose.position.x, latest_odom_msg_.pose.pose.position.y, 
+						tf::getYaw(latest_odom_msg_.pose.pose.orientation),latest_odom_tf_	);
+
+    inc_tf = last_used_odom_tf_.inverse() * latest_odom_tf_;
+    last_used_odom_tf_ = latest_odom_tf_;
     // Commenting this part because we are not using angular information from odometry
     
     // pr_ch_a = tf::getYaw(latest_odom_msg_.pose.pose.orientation) -
@@ -906,8 +888,6 @@ void LaserScanMatcher::getPrediction(double& pr_ch_x, double& pr_ch_y,
 
     // if      (pr_ch_a >= M_PI) pr_ch_a -= 2.0 * M_PI;
     // else if (pr_ch_a < -M_PI) pr_ch_a += 2.0 * M_PI;
-
-    last_used_odom_msg_ = latest_odom_msg_;
   }
 
   // **** use imu
@@ -915,10 +895,7 @@ void LaserScanMatcher::getPrediction(double& pr_ch_x, double& pr_ch_y,
   {
     pr_ch_a = tf::getYaw(latest_imu_msg_.orientation) -
               tf::getYaw(last_used_imu_msg_.orientation);
-
-    if      (pr_ch_a >= M_PI) pr_ch_a -= 2.0 * M_PI;
-    else if (pr_ch_a < -M_PI) pr_ch_a += 2.0 * M_PI;
-
+    createTfFromXYTheta(0, 0, pr_ch_a, inc_tf );
     last_used_imu_msg_ = latest_imu_msg_;
   }
 }
